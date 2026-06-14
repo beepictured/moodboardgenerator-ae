@@ -499,22 +499,31 @@
   .mb-outfit-item {
     display: flex;
     align-items: flex-start;
-    gap: 7px;
+    gap: 9px;
     flex: 1;
     min-height: 0;
     padding: 6px 0;
     border-bottom: 1px solid var(--mb-line);
   }
   .mb-outfit-item:last-child { border-bottom: none; }
-  .mb-outfit-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
+  .mb-outfit-thumb {
+    width: clamp(28px, 3.2vw, 42px);
+    height: clamp(28px, 3.2vw, 42px);
+    border-radius: 4px;
     flex-shrink: 0;
-    margin-top: 2px;
-    border: 1px solid rgba(0,0,0,0.08);
+    overflow: hidden;
+    border-bottom: 3px solid var(--swatch-color, #c8b49a);
+    background: var(--mb-line);
   }
-  .mb-outfit-text {}
+  .mb-outfit-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .mb-outfit-text {
+    padding-top: 1px;
+  }
   .mb-outfit-piece {
     font-family: var(--font-display);
     font-weight: 600;
@@ -888,7 +897,9 @@
             <div class="mb-clothing-title">Outfit-Inspiration</div>
             <div class="mb-outfit-list" id="mbOutfitList">
               <div class="mb-outfit-item">
-                <div class="mb-outfit-dot" style="background:#c8b49a"></div>
+                <div class="mb-outfit-thumb" style="--swatch-color:#c8b49a">
+                  <span class="mb-photo-placeholder" style="font-size:7px;padding:2px;">Bild</span>
+                </div>
                 <div class="mb-outfit-text">
                   <div class="mb-outfit-piece">Leinen-Wickelkleid</div>
                   <div class="mb-outfit-details">Fließend, creme, natürlicher Stoff</div>
@@ -1101,6 +1112,9 @@ async function generate() {
     if(document.getElementById('useAI').checked) {
       document.getElementById('loadingText').textContent = 'Outfit-Vorschläge werden generiert …';
       await generateOutfits();
+    } else {
+      document.getElementById('loadingText').textContent = 'Outfit-Bilder werden geladen …';
+      await renderOutfits(getFallbackOutfits());
     }
     applyFooter();
     document.getElementById('downloadBtn').classList.add('visible');
@@ -1240,7 +1254,7 @@ Genau 4 Einträge. Farben passend zur Palette. Professionell und praktisch.`;
     const outfits = JSON.parse(clean);
     if(Array.isArray(outfits) && outfits.length>0) {
       state.outfits = outfits;
-      renderOutfits(outfits);
+      await renderOutfits(outfits);
       document.getElementById('aiStatus').textContent = '✓ Outfits generiert';
       document.getElementById('aiStatus').className = 'status-msg ok';
       return;
@@ -1250,7 +1264,7 @@ Genau 4 Einträge. Farben passend zur Palette. Professionell und praktisch.`;
     console.warn('AI Outfits failed, using fallback:', err);
     document.getElementById('aiStatus').textContent = `Fallback-Outfits (${err.message})`;
     document.getElementById('aiStatus').className = 'status-msg';
-    renderOutfits(getFallbackOutfits());
+    await renderOutfits(getFallbackOutfits());
   }
 }
 
@@ -1280,15 +1294,43 @@ function getFallbackOutfits() {
 
 function renderOutfits(outfits) {
   const list = document.getElementById('mbOutfitList');
-  list.innerHTML = outfits.slice(0,4).map(o=>`
+  const styleKw = state.style.toLowerCase();
+  const typeKw = state.type.toLowerCase();
+
+  list.innerHTML = outfits.slice(0,4).map((o,i)=>`
     <div class="mb-outfit-item">
-      <div class="mb-outfit-dot" style="background:${o.color_hex||'#c8b49a'}"></div>
+      <div class="mb-outfit-thumb" id="outfitThumb${i}" style="--swatch-color:${o.color_hex||'#c8b49a'}">
+        <span class="mb-photo-placeholder" style="font-size:7px;padding:2px;">…</span>
+      </div>
       <div class="mb-outfit-text">
         <div class="mb-outfit-piece">${o.piece||''}</div>
         <div class="mb-outfit-details">${o.details||''}</div>
       </div>
     </div>
   `).join('');
+
+  // Lade Bilder asynchron pro Outfit-Item, gibt Promise zurück das wartet bis alle fertig/timeout sind
+  const loads = outfits.slice(0,4).map((o,i)=>new Promise(resolve=>{
+    const pieceKw = (o.piece||'').split(' ').slice(0,2).join(' ').toLowerCase();
+    const query = `${pieceKw} fashion ${styleKw} ${typeKw}`.trim();
+    const url = `https://source.unsplash.com/200x200/?${encodeURIComponent(query)}&sig=${Date.now()+i}`;
+    const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';
+    img.onload = ()=>{
+      const cell = document.getElementById(`outfitThumb${i}`);
+      if(cell) { cell.innerHTML=''; cell.appendChild(img); }
+      resolve();
+    };
+    img.onerror = ()=>{
+      const cell = document.getElementById(`outfitThumb${i}`);
+      if(cell) cell.innerHTML = `<span class="mb-photo-placeholder" style="font-size:7px;padding:2px;">Bild</span>`;
+      resolve();
+    };
+    img.src = url;
+    setTimeout(()=>resolve(), 8000);
+  }));
+
+  return Promise.all(loads);
 }
 
 function applyFooter() {
