@@ -752,7 +752,7 @@
       <div class="form-row">
         <label>Location</label>
         <div class="btn-group" id="locationGroup">
-          <button class="active" data-val="Indoor">Indoor</button>
+          <button class="active" data-val="Outdoor">Outdoor</button>
           <button data-val="Studio">Studio</button>
           <button data-val="Wiese">Wiese</button>
           <button data-val="Feld">Feld</button>
@@ -875,7 +875,7 @@
             <div class="mb-vision-table" id="mbVisionTable">
               <div class="mb-vision-row"><span class="mb-vision-label">Stil</span><span class="mb-vision-value" id="vStyle">Boho</span></div>
               <div class="mb-vision-row"><span class="mb-vision-label">Shooting</span><span class="mb-vision-value" id="vType">Newborn</span></div>
-              <div class="mb-vision-row"><span class="mb-vision-label">Location</span><span class="mb-vision-value" id="vLocation">Indoor</span></div>
+              <div class="mb-vision-row"><span class="mb-vision-label">Location</span><span class="mb-vision-value" id="vLocation">Outdoor</span></div>
               <div class="mb-vision-row"><span class="mb-vision-label">Stimmung</span><span class="mb-vision-value" id="vMood">Warm · Sanft</span></div>
             </div>
             <div>
@@ -911,7 +911,7 @@
 
         <!-- Footer -->
         <div class="mb-footer" id="mbFooter">
-          <div class="mb-tags" id="mbTags">Boho · Newborn · Indoor</div>
+          <div class="mb-tags" id="mbTags">Boho · Newborn · Outdoor</div>
           <div class="mb-credit" id="mbCredit">Curated by beepictured · 2025</div>
         </div>
       </div>
@@ -928,10 +928,27 @@ const state = {
   ownImages: [null, null, null, null],
   palette: [],
   outfits: [],
-  location: 'Indoor',
+  location: 'Outdoor',
   type: 'Newborn',
   style: 'Boho',
 };
+
+// ─── DE→EN Keyword-Mapping für LoremFlickr (braucht englische Suchbegriffe) ──
+const LOCATION_KW = {
+  'outdoor':'outdoor', 'studio':'studio', 'wiese':'meadow',
+  'feld':'field', 'wald':'forest', 'düne':'dune'
+};
+const TYPE_KW = {
+  'familie':'family', 'newborn':'newborn', 'babybauch':'pregnancy',
+  'business':'businessportrait', 'hochzeit':'wedding', 'paar':'couple'
+};
+const STYLE_KW = {
+  'clean':'minimal', 'boho':'boho', 'chic':'elegant',
+  'editorial':'editorial', 'vintage':'vintage', 'modern':'modern'
+};
+function toEnLocation(v) { return LOCATION_KW[v.toLowerCase()] || v.toLowerCase(); }
+function toEnType(v) { return TYPE_KW[v.toLowerCase()] || v.toLowerCase(); }
+function toEnStyle(v) { return STYLE_KW[v.toLowerCase()] || v.toLowerCase(); }
 
 // ─── PALETTE GENERATOR ───────────────────────────────────────────────
 function hexToHSL(hex) {
@@ -1191,29 +1208,40 @@ async function applyImages() {
     return;
   }
 
-  // Unsplash
-  const keywords = [state.style.toLowerCase(), state.type.toLowerCase(), state.location.toLowerCase(), 'photography'];
+  // LoremFlickr (source.unsplash.com ist seit 2023 abgeschaltet)
+  const styleKw = toEnStyle(state.style);
+  const typeKw = toEnType(state.type);
+  const locationKw = toEnLocation(state.location);
   const queries = [
-    `${state.type.toLowerCase()} photography ${state.style.toLowerCase()}`,
-    `${state.location.toLowerCase()} nature soft light`,
-    `newborn baby minimal photography`,
-    `${state.style.toLowerCase()} aesthetic photography warm`
+    `${typeKw},${styleKw},photography`,
+    `${locationKw},nature,light`,
+    `newborn,baby,portrait`,
+    `${styleKw},aesthetic,warm`
   ];
 
   const loads = queries.map((q,i)=>new Promise(resolve=>{
-    const url = `https://source.unsplash.com/600x800/?${encodeURIComponent(q)}&sig=${Date.now()+i}`;
-    const img = document.createElement('img');
-    img.crossOrigin = 'anonymous';
-    img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
-    img.onload = ()=>{ cells[i].innerHTML=''; cells[i].appendChild(img); resolve(); };
-    img.onerror = ()=>{ cells[i].innerHTML=`<span class="mb-photo-placeholder">Bild ${i+1}</span>`; resolve(); };
-    img.src = url;
+    const primaryUrl = `https://loremflickr.com/600/800/${encodeURIComponent(q)}?lock=${Date.now()+i}`;
+    const fallbackUrl = `https://picsum.photos/seed/${encodeURIComponent(q+'-'+i)}/600/800`;
+
+    const tryLoad = (src, isFallback) => {
+      const img = document.createElement('img');
+      img.crossOrigin = 'anonymous';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+      img.onload = ()=>{ cells[i].innerHTML=''; cells[i].appendChild(img); resolve(); };
+      img.onerror = ()=>{
+        if(!isFallback) tryLoad(fallbackUrl, true);
+        else { cells[i].innerHTML=`<span class="mb-photo-placeholder">Bild ${i+1}</span>`; resolve(); }
+      };
+      img.src = src;
+    };
+    tryLoad(primaryUrl, false);
     // timeout fallback
-    setTimeout(()=>resolve(), 8000);
+    setTimeout(()=>resolve(), 10000);
   }));
 
   await Promise.all(loads);
 }
+
 
 // ─── OUTFIT AI ───────────────────────────────────────────────────────
 async function generateOutfits() {
@@ -1294,8 +1322,8 @@ function getFallbackOutfits() {
 
 function renderOutfits(outfits) {
   const list = document.getElementById('mbOutfitList');
-  const styleKw = state.style.toLowerCase();
-  const typeKw = state.type.toLowerCase();
+  const styleKw = toEnStyle(state.style);
+  const typeKw = toEnType(state.type);
 
   list.innerHTML = outfits.slice(0,4).map((o,i)=>`
     <div class="mb-outfit-item">
@@ -1310,24 +1338,41 @@ function renderOutfits(outfits) {
   `).join('');
 
   // Lade Bilder asynchron pro Outfit-Item, gibt Promise zurück das wartet bis alle fertig/timeout sind
+  // Einfache DE→EN Mapping für häufige Kleidungsbegriffe (LoremFlickr braucht englische Keywords)
+  const CLOTHING_KW_MAP = {
+    'kleid':'dress','wickelkleid':'wrapdress','maxikleid':'maxidress','hose':'pants',
+    'shorts':'shorts','hemd':'shirt','shirt':'shirt','leinenshirt':'linenshirt',
+    'pullover':'sweater','strickjacke':'cardigan','jacke':'jacket','rock':'skirt',
+    'romper':'romper','body':'bodysuit','wrap':'swaddle','tuch':'scarf','schal':'scarf',
+    'mütze':'hat','hut':'hat','strohhut':'strawhat','accessoire':'accessories',
+    'accessoires':'accessories','schuhe':'shoes','sandalen':'sandals','overall':'overalls',
+    'set':'outfit','outfit':'outfit','jumpsuit':'jumpsuit','bluse':'blouse'
+  };
+  function pieceToKeyword(piece) {
+    const words = (piece||'').toLowerCase().replace(/[:,.]/g,'').split(/\s+/);
+    for(const w of words) { if(CLOTHING_KW_MAP[w]) return CLOTHING_KW_MAP[w]; }
+    return 'fashion';
+  }
+
   const loads = outfits.slice(0,4).map((o,i)=>new Promise(resolve=>{
-    const pieceKw = (o.piece||'').split(' ').slice(0,2).join(' ').toLowerCase();
-    const query = `${pieceKw} fashion ${styleKw} ${typeKw}`.trim();
-    const url = `https://source.unsplash.com/200x200/?${encodeURIComponent(query)}&sig=${Date.now()+i}`;
-    const img = document.createElement('img');
-    img.crossOrigin = 'anonymous';
-    img.onload = ()=>{
-      const cell = document.getElementById(`outfitThumb${i}`);
-      if(cell) { cell.innerHTML=''; cell.appendChild(img); }
-      resolve();
+    const pieceKw = pieceToKeyword(o.piece);
+    const query = `${pieceKw},${styleKw},${typeKw}`;
+    const primaryUrl = `https://loremflickr.com/200/200/${encodeURIComponent(query)}?lock=${Date.now()+i}`;
+    const fallbackUrl = `https://picsum.photos/seed/${encodeURIComponent(pieceKw+'-'+i)}/200/200`;
+
+    const cell = document.getElementById(`outfitThumb${i}`);
+    const tryLoad = (src, isFallback) => {
+      const img = document.createElement('img');
+      img.crossOrigin = 'anonymous';
+      img.onload = ()=>{ if(cell) { cell.innerHTML=''; cell.appendChild(img); } resolve(); };
+      img.onerror = ()=>{
+        if(!isFallback) tryLoad(fallbackUrl, true);
+        else { if(cell) cell.innerHTML = `<span class="mb-photo-placeholder" style="font-size:7px;padding:2px;">Bild</span>`; resolve(); }
+      };
+      img.src = src;
     };
-    img.onerror = ()=>{
-      const cell = document.getElementById(`outfitThumb${i}`);
-      if(cell) cell.innerHTML = `<span class="mb-photo-placeholder" style="font-size:7px;padding:2px;">Bild</span>`;
-      resolve();
-    };
-    img.src = url;
-    setTimeout(()=>resolve(), 8000);
+    tryLoad(primaryUrl, false);
+    setTimeout(()=>resolve(), 10000);
   }));
 
   return Promise.all(loads);
