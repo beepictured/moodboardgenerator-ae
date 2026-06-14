@@ -514,12 +514,22 @@
     overflow: hidden;
     border-bottom: 3px solid var(--swatch-color, #c8b49a);
     background: var(--mb-line);
+    position: relative;
   }
   .mb-outfit-thumb img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+    filter: grayscale(35%);
+  }
+  .mb-outfit-thumb .mb-outfit-tint {
+    position: absolute;
+    inset: 0;
+    background: var(--swatch-color, #c8b49a);
+    mix-blend-mode: multiply;
+    opacity: 0.45;
+    pointer-events: none;
   }
   .mb-outfit-text {
     padding-top: 1px;
@@ -935,15 +945,15 @@ const state = {
 
 // ─── DE→EN Keyword-Mapping für LoremFlickr (braucht englische Suchbegriffe) ──
 const LOCATION_KW = {
-  'outdoor':'outdoor', 'studio':'studio', 'wiese':'meadow',
-  'feld':'field', 'wald':'forest', 'düne':'dune'
+  'outdoor':'outdoors', 'studio':'studio', 'wiese':'meadow',
+  'feld':'field', 'wald':'forest', 'düne':'dunes'
 };
 const TYPE_KW = {
   'familie':'family', 'newborn':'newborn', 'babybauch':'pregnancy',
-  'business':'businessportrait', 'hochzeit':'wedding', 'paar':'couple'
+  'business':'portrait', 'hochzeit':'wedding', 'paar':'couple'
 };
 const STYLE_KW = {
-  'clean':'minimal', 'boho':'boho', 'chic':'elegant',
+  'clean':'minimalism', 'boho':'bohemian', 'chic':'elegance',
   'editorial':'editorial', 'vintage':'vintage', 'modern':'modern'
 };
 function toEnLocation(v) { return LOCATION_KW[v.toLowerCase()] || v.toLowerCase(); }
@@ -1208,16 +1218,12 @@ async function applyImages() {
     return;
   }
 
-  // LoremFlickr (source.unsplash.com ist seit 2023 abgeschaltet)
+  // LoremFlickr: EIN präzises Keyword pro Bild liefert deutlich bessere Treffer
+  // als mehrere kommagetrennte Begriffe (die oft zu leeren Schnittmengen führen).
   const styleKw = toEnStyle(state.style);
   const typeKw = toEnType(state.type);
   const locationKw = toEnLocation(state.location);
-  const queries = [
-    `${typeKw},${styleKw},photography`,
-    `${locationKw},nature,light`,
-    `newborn,baby,portrait`,
-    `${styleKw},aesthetic,warm`
-  ];
+  const queries = [typeKw, locationKw, styleKw, typeKw];
 
   const loads = queries.map((q,i)=>new Promise(resolve=>{
     const primaryUrl = `https://loremflickr.com/600/800/${encodeURIComponent(q)}?lock=${Date.now()+i}`;
@@ -1322,8 +1328,6 @@ function getFallbackOutfits() {
 
 function renderOutfits(outfits) {
   const list = document.getElementById('mbOutfitList');
-  const styleKw = toEnStyle(state.style);
-  const typeKw = toEnType(state.type);
 
   list.innerHTML = outfits.slice(0,4).map((o,i)=>`
     <div class="mb-outfit-item">
@@ -1338,33 +1342,43 @@ function renderOutfits(outfits) {
   `).join('');
 
   // Lade Bilder asynchron pro Outfit-Item, gibt Promise zurück das wartet bis alle fertig/timeout sind
-  // Einfache DE→EN Mapping für häufige Kleidungsbegriffe (LoremFlickr braucht englische Keywords)
+  // Einfache DE→EN Mapping für häufige Kleidungsbegriffe (LoremFlickr braucht englische, gängige Flickr-Tags)
   const CLOTHING_KW_MAP = {
-    'kleid':'dress','wickelkleid':'wrapdress','maxikleid':'maxidress','hose':'pants',
-    'shorts':'shorts','hemd':'shirt','shirt':'shirt','leinenshirt':'linenshirt',
+    'kleid':'dress','wickelkleid':'dress','maxikleid':'dress','hose':'pants',
+    'shorts':'shorts','hemd':'shirt','shirt':'shirt','leinenshirt':'linen',
     'pullover':'sweater','strickjacke':'cardigan','jacke':'jacket','rock':'skirt',
-    'romper':'romper','body':'bodysuit','wrap':'swaddle','tuch':'scarf','schal':'scarf',
-    'mütze':'hat','hut':'hat','strohhut':'strawhat','accessoire':'accessories',
-    'accessoires':'accessories','schuhe':'shoes','sandalen':'sandals','overall':'overalls',
-    'set':'outfit','outfit':'outfit','jumpsuit':'jumpsuit','bluse':'blouse'
+    'romper':'baby','body':'baby','wrap':'fabric','tuch':'fabric','schal':'scarf',
+    'mütze':'hat','hut':'hat','strohhut':'hat','accessoire':'accessories',
+    'accessoires':'accessories','schuhe':'shoes','sandalen':'sandals','overall':'denim',
+    'set':'fashion','outfit':'fashion','jumpsuit':'jumpsuit','bluse':'blouse'
   };
   function pieceToKeyword(piece) {
     const words = (piece||'').toLowerCase().replace(/[:,.]/g,'').split(/\s+/);
     for(const w of words) { if(CLOTHING_KW_MAP[w]) return CLOTHING_KW_MAP[w]; }
-    return 'fashion';
+    return 'fabric';
   }
 
   const loads = outfits.slice(0,4).map((o,i)=>new Promise(resolve=>{
     const pieceKw = pieceToKeyword(o.piece);
-    const query = `${pieceKw},${styleKw},${typeKw}`;
-    const primaryUrl = `https://loremflickr.com/200/200/${encodeURIComponent(query)}?lock=${Date.now()+i}`;
+    const primaryUrl = `https://loremflickr.com/200/200/${encodeURIComponent(pieceKw)}?lock=${Date.now()+i}`;
     const fallbackUrl = `https://picsum.photos/seed/${encodeURIComponent(pieceKw+'-'+i)}/200/200`;
+    const tintColor = o.color_hex || '#c8b49a';
 
     const cell = document.getElementById(`outfitThumb${i}`);
+    const finish = (img) => {
+      if(!cell) return resolve();
+      cell.innerHTML = '';
+      cell.appendChild(img);
+      const tint = document.createElement('div');
+      tint.className = 'mb-outfit-tint';
+      tint.style.background = tintColor;
+      cell.appendChild(tint);
+      resolve();
+    };
     const tryLoad = (src, isFallback) => {
       const img = document.createElement('img');
       img.crossOrigin = 'anonymous';
-      img.onload = ()=>{ if(cell) { cell.innerHTML=''; cell.appendChild(img); } resolve(); };
+      img.onload = ()=> finish(img);
       img.onerror = ()=>{
         if(!isFallback) tryLoad(fallbackUrl, true);
         else { if(cell) cell.innerHTML = `<span class="mb-photo-placeholder" style="font-size:7px;padding:2px;">Bild</span>`; resolve(); }
